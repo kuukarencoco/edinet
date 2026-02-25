@@ -3,7 +3,6 @@ import datetime
 import tweepy
 import os
 
-# 認証
 X_CLIENT = tweepy.Client(
     consumer_key=os.environ["X_API_KEY"],
     consumer_secret=os.environ["X_API_SECRET"],
@@ -19,8 +18,20 @@ def get_st_listings():
     params = {"date": today, "type": 2, "Subscription-Key": EDINET_API_KEY}
     
     res = requests.get(url, params=params)
-    data = res.json()
     
+    # --- エラー原因を特定するためのログ機能 ---
+    if res.status_code != 200:
+        print(f"EDINETエラー: ステータスコード {res.status_code}")
+        return []
+    
+    try:
+        data = res.json()
+    except Exception as e:
+        print("【原因】EDINETからデータではない応答が返りました。")
+        print(f"レスポンスの先頭: {res.text[:100]}") # 最初の100文字を表示
+        return []
+    # ------------------------------------
+
     targets = []
     posted_ids = []
     if os.path.exists(LOG_FILE):
@@ -29,20 +40,18 @@ def get_st_listings():
 
     if "results" in data:
         for doc in data["results"]:
-            # 有価証券届出書(030000) かつ 訂正でない かつ 未投稿
             if doc.get("docTypeCode") == "030000" and "訂正" not in doc.get("docDescription", ""):
                 doc_id = doc.get("docID")
                 if doc_id not in posted_ids:
-                    description = doc.get("docDescription", "")
-                    # キーワード判定
-                    if "トークン" in description or "内国信託受益証券" in description:
+                    desc = doc.get("docDescription", "")
+                    if "トークン" in desc or "内国信託受益証券" in desc:
                         targets.append(doc)
     return targets
 
 def main():
     targets = get_st_listings()
     if not targets:
-        print(f"{datetime.datetime.now()}: 該当なし")
+        print(f"{datetime.datetime.now()}: 有効な銘柄なし")
         return
 
     for doc in targets:
@@ -59,9 +68,9 @@ def main():
             X_CLIENT.create_tweet(text=message)
             with open(LOG_FILE, "a") as f:
                 f.write(doc_id + "\n")
-            print(f"成功: {doc_id}")
+            print(f"投稿成功: {doc_id}")
         except Exception as e:
-            print(f"エラー: {e}")
+            print(f"投稿エラー: {e}")
 
 if __name__ == "__main__":
     main()
